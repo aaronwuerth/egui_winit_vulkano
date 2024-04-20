@@ -15,8 +15,8 @@ use vulkano::{
     buffer::{AllocateBufferError, Buffer, BufferCreateInfo, BufferUsage},
     command_buffer::{
         allocator::{StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo},
-        AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferToImageInfo,
-        PrimaryCommandBufferAbstract,
+        CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsage, CopyBufferToImageInfo,
+        RecordingCommandBuffer,
     },
     descriptor_set::allocator::StandardDescriptorSetAllocator,
     device::{Device, Queue},
@@ -40,10 +40,15 @@ pub fn immutable_texture_from_bytes(
     dimensions: [u32; 2],
     format: vulkano::format::Format,
 ) -> Result<Arc<ImageView>, ImageCreationError> {
-    let mut cbb = AutoCommandBufferBuilder::primary(
-        &allocators.command_buffer,
+    let mut cbb = RecordingCommandBuffer::new(
+        allocators.command_buffer.clone(),
         queue.queue_family_index(),
-        CommandBufferUsage::OneTimeSubmit,
+        CommandBufferLevel::Primary,
+        CommandBufferBeginInfo {
+            usage: CommandBufferUsage::OneTimeSubmit,
+            inheritance_info: None,
+            ..Default::default()
+        },
     )
     .map_err(ImageCreationError::Vulkan)?;
 
@@ -78,7 +83,7 @@ pub fn immutable_texture_from_bytes(
     ))
     .map_err(ImageCreationError::Validation)?;
 
-    let _fut = cbb.build().unwrap().execute(queue).unwrap();
+    let _fut = cbb.end().unwrap().execute(queue).unwrap();
 
     Ok(ImageView::new_default(texture).unwrap())
 }
@@ -114,22 +119,25 @@ pub fn immutable_texture_from_file(
 
 pub struct Allocators {
     pub memory: Arc<StandardMemoryAllocator>,
-    pub descriptor_set: StandardDescriptorSetAllocator,
-    pub command_buffer: StandardCommandBufferAllocator,
+    pub descriptor_set: Arc<StandardDescriptorSetAllocator>,
+    pub command_buffer: Arc<StandardCommandBufferAllocator>,
 }
 
 impl Allocators {
     pub fn new_default(device: &Arc<Device>) -> Self {
         Self {
             memory: Arc::new(StandardMemoryAllocator::new_default(device.clone())),
-            descriptor_set: StandardDescriptorSetAllocator::new(device.clone(), Default::default()),
-            command_buffer: StandardCommandBufferAllocator::new(
+            descriptor_set: Arc::new(StandardDescriptorSetAllocator::new(
+                device.clone(),
+                Default::default(),
+            )),
+            command_buffer: Arc::new(StandardCommandBufferAllocator::new(
                 device.clone(),
                 StandardCommandBufferAllocatorCreateInfo {
                     secondary_buffer_count: 32,
                     ..Default::default()
                 },
-            ),
+            )),
         }
     }
 }
